@@ -1,0 +1,77 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#54b9f0">
+  <title>Consultor medico</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js"></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <main class="app">
+    <!-- Zona de chat -->
+    <section id="zona-chat" aria-label="Zona de chat">
+      <header class="chat-header">
+        <div class="brand-icon" aria-hidden="true">✦</div>
+        <div class="brand-text">
+          <h1>Consultor medico</h1>
+          <p>Tu asistente para resolver dudas</p>
+        </div>
+        <span class="status"><span></span> En línea</span>
+      </header>
+
+      <div class="chat-messages" id="mensajes" aria-live="polite"
+           aria-label="Mensajes de la conversación">
+        <article class="message agent">
+          <div class="avatar">✦</div>
+          <div class="bubble">
+            <span class="sender">Consultor medico</span>
+            <p>¡Hola! 👋 Soy tu asistente virtual. Estoy acá para ayudarte con dudas sobre trámites, documentación y temas específicos.</p>
+            <p>¿Qué necesitás consultar hoy?</p>
+            <time>Ahora</time>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Zona de escritura -->
+    <section id="zona-escritura" aria-label="Zona de escritura">
+      <div class="writing-title">
+        <div>
+          <h2>Escribí tu consulta</h2>
+          <p>Contame qué necesitás saber.</p>
+        </div>
+        <span class="writing-icon" aria-hidden="true">✎</span>
+      </div>
+
+      <form id="formulario-chat">
+        <label class="visually-hidden" for="entrada">
+          Escribí tu mensaje
+        </label>
+        <textarea id="entrada" rows="2" maxlength="2000"
+          placeholder="Escribí tu consulta acá..."
+          required></textarea>
+
+        <div class="composer-footer">
+          <span id="contador">0 / 2000</span>
+          <button id="enviar" type="submit">
+            <span>Enviar consulta</span>
+            <span aria-hidden="true">➤</span>
+          </button>
+        </div>
+      </form>
+
+      <p id="estado" class="feedback" role="status">
+        Tus consultas aparecerán en la conversación.
+      </p>
+      <p class="disclaimer">
+        Este asistente brinda información general y no reemplaza
+        la atención de un profesional de la salud.
+      </p>
+    </section>
+  </main>
+</body>
+</html>
