@@ -1,4 +1,3 @@
-
 /* Consultor medico: lógica del chat y conexión con el webhook. */
 
 const formulario = document.getElementById("formulario-chat");
@@ -8,15 +7,32 @@ const mensajes = document.getElementById("mensajes");
 const estado = document.getElementById("estado");
 const contador = document.getElementById("contador");
 
-const TIEMPO_LIMITE = 20000;
+const TIEMPO_LIMITE = 30000;
 const ESPERA_ENTRE_ENVIOS = 1500;
 
 let enviando = false;
 let ultimoEnvio = 0;
 
-// Actualiza el contador de caracteres.
+// Generar o recuperar sessionId único de manera segura
+let sessionId;
+try {
+  sessionId = localStorage.getItem("chat_session_id");
+  if (!sessionId) {
+    sessionId = typeof crypto !== "undefined" && crypto.randomUUID 
+      ? crypto.randomUUID() 
+      : 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem("chat_session_id", sessionId);
+  }
+} catch (e) {
+  sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+}
+
+// Actualiza el contador de caracteres y valida el límite de 500
 entrada.addEventListener("input", () => {
-  contador.textContent = `${entrada.value.length} / 2000`;
+  if (entrada.value.length > 500) {
+    entrada.value = entrada.value.slice(0, 500);
+  }
+  contador.textContent = `${entrada.value.length} / 500`;
 });
 
 // Permite enviar con Enter y escribir varias líneas con Shift + Enter.
@@ -67,24 +83,65 @@ function mostrarEstado(texto, tipo = "") {
   estado.className = `feedback ${tipo}`.trim();
 }
 
-// Extrae respuestas habituales de un webhook.
-function extraerRespuesta(datos) {
-  if (typeof datos === "string") return datos;
+// Procesa y limpia la respuesta de Make con alta tolerancia a formatos
+function procesarRespuestaMake(textoBruto) {
+  let texto = textoBruto.trim();
 
-  if (datos && typeof datos === "object") {
-    const respuesta =
-      datos.respuesta ??
-      datos.response ??
-      datos.answer ??
-      datos.mensaje ??
-      datos.message;
-
-    if (typeof respuesta === "string" && respuesta.trim()) {
-      return respuesta;
-    }
+  if (!texto) {
+    return "(respuesta vacía)";
   }
 
-  throw new Error("El webhook no devolvió una respuesta reconocida.");
+  // Limpiar envoltorios de bloques de código Markdown (ej. ```json ... ```)
+  if (texto.startsWith("```")) {
+    texto = texto.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "").trim();
+  }
+
+  try {
+    const datos = JSON.parse(texto);
+    return extraerValorObjeto(datos);
+  } catch (e) {
+    // Si falla JSON.parse pero parece un objeto JSON, intentamos escapar saltos de línea internos o extraer por regex
+    if (texto.startsWith("{") && texto.endsWith("}")) {
+      try {
+        const textoEscapado = texto.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+        const datosEscapados = JSON.parse(textoEscapado);
+        return extraerValorObjeto(datosEscapados);
+      } catch (err2) {
+        // Extracción por expresión regular de propiedades clave comunes
+        for (const clave of ["response", "respuesta", "message", "mensaje"]) {
+          const regex = new RegExp(`["']?${clave}["']?\\s*:\\s*["']([^"']+)["']`, "i");
+          const match = texto.match(regex);
+          if (match && match[1]) {
+            return match[1].trim();
+          }
+        }
+      }
+    }
+
+    // Si es texto plano real o no es un objeto válido, se devuelve tal cual
+    return texto;
+  }
+}
+
+// Extrae el primer valor de texto no vacío entre las propiedades prioritarias
+function extraerValorObjeto(datos) {
+  if (datos === null || datos === undefined) {
+    return "(respuesta vacía)";
+  }
+
+  if (typeof datos !== "object") {
+    return String(datos);
+  }
+
+  const claveEncontrada = ["response", "respuesta", "message", "mensaje"].find(
+    (k) => typeof datos[k] === "string" && datos[k].trim() !== ""
+  );
+
+  if (claveEncontrada) {
+    return datos[claveEncontrada].trim();
+  }
+
+  return "Make respondió, pero sin el campo response";
 }
 
 // Gestiona el envío y los estados de carga, éxito y error.
@@ -94,6 +151,11 @@ formulario.addEventListener("submit", async (evento) => {
   const consulta = entrada.value.trim();
 
   if (!consulta || enviando) return;
+
+  if (consulta.length > 500) {
+    mostrarEstado("El mensaje no puede superar los 500 caracteres.", "error");
+    return;
+  }
 
   // Evita envíos demasiado seguidos.
   const ahora = Date.now();
@@ -110,12 +172,10 @@ formulario.addEventListener("submit", async (evento) => {
 
   if (
     !WEBHOOK_URL ||
+    WEBHOOK_URL.includes("ACA VA") ||
     WEBHOOK_URL.includes("ejemplo-webhook-prueba")
   ) {
-    mostrarEstado(
-      "Configurá una URL de webhook válida en config.js para recibir respuestas.",
-      "error"
-    );
+    mostrarEstado("Falta pegar la URL de tu webhook en config.js", "error");
     return;
   }
 
@@ -140,7 +200,7 @@ formulario.addEventListener("submit", async (evento) => {
 
   mostrarEstado("Enviando tu consulta...", "");
   entrada.value = "";
-  contador.textContent = "0 / 2000";
+  contador.textContent = "0 / 500";
 
   const controlador = new AbortController();
   const temporizador = setTimeout(
@@ -152,44 +212,41 @@ formulario.addEventListener("submit", async (evento) => {
     const respuestaHTTP = await fetch(WEBHOOK_URL, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/plain"
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
+        sessionId,
         mensaje: consulta,
-        agente: "Consultor medico"
+        fecha: new Date().toISOString()
       }),
       signal: controlador.signal
     });
 
     if (!respuestaHTTP.ok) {
-      throw new Error(`Error HTTP ${respuestaHTTP.status}`);
+      throw new Error(`Make respondió con error (código ${respuestaHTTP.status}). Revisá que tu escenario esté en Active o que hayas apretado Run once.`);
     }
 
-    const contenido = await respuestaHTTP.text();
-
-    let datos;
-    try {
-      datos = JSON.parse(contenido);
-    } catch {
-      datos = contenido;
-    }
-
-    const respuesta = extraerRespuesta(datos);
+    const contenidoBruto = await respuestaHTTP.text();
+    const respuestaProcesada = procesarRespuestaMake(contenidoBruto);
 
     indicador.remove();
-    agregarMensaje(respuesta, "agent");
+    agregarMensaje(respuestaProcesada, "agent");
     mostrarEstado("Respuesta recibida correctamente.", "success");
 
   } catch (error) {
     indicador.remove();
 
-    const mensajeError = error.name === "AbortError"
-      ? "La consulta tardó demasiado. Intentá nuevamente."
-      : "No pudimos obtener una respuesta. Revisá el webhook e intentá nuevamente.";
+    let mensajeError = error.message;
+    let tipoError = "error";
+
+    if (error.name === "AbortError") {
+      mensajeError = "La solicitud tardó demasiado tiempo en responder (tiempo agotado).";
+    } else if (!navigator.onLine || error.message.includes("Failed to fetch")) {
+      mensajeError = "Hubo un fallo de red. Comprobá tu conexión a internet.";
+    }
 
     agregarMensaje(mensajeError, "agent");
-    mostrarEstado(mensajeError, "error");
+    mostrarEstado(mensajeError, tipoError);
 
     console.error("Error en la consulta:", error);
 
